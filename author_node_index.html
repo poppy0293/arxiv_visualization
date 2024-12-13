@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <title>Author Collaboration Graph</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    .node:hover {
+      opacity: 0.8;
+      cursor: pointer;
+    }
+    .link:hover {
+      cursor: pointer;
+    }
+    .tooltip {
+      position: absolute;
+      text-align: center;
+      padding: 8px;
+      font-size: 36px; /* 增大字体 */
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      border-radius: 4px;
+      pointer-events: none;
+      visibility: hidden;
+    }
+    .legend {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 20px; /* 增加 padding */
+      font-size: 40px; /* 增大字体 */
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+      width: 300px; /* 增宽 legend */
+    }
+    .legend h3 {
+      margin: 0 0 20px;
+      font-size: 44px; /* 调大标题字体 */
+      text-align: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 10px; /* 增加间距 */
+    }
+    .legend-item span.color-box {
+      width: 30px; /* 增大颜色方块 */
+      height: 30px; /* 增大颜色方块 */
+      margin-right: 15px; /* 增大间距 */
+      border: 1px solid #333;
+      cursor: pointer;
+    }
+    .button-container {
+      margin-top: 20px;
+      text-align: center;
+    }
+    .reset-button {
+      padding: 15px 25px; /* 增大按钮尺寸 */
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 32px; /* 增大按钮字体 */
+    }
+    .reset-button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+<div class="tooltip"></div>
+<div class="legend">
+  <h3>Legend</h3>
+  <div class="legend-items"></div>
+  <div class="button-container">
+    <button class="reset-button">Reset</button>
+  </div>
+</div>
+
+<script>
+
+  // Set up SVG dimensions and margins
+  const width = window.innerWidth; 
+  const height = window.innerHeight;
+
+  // Append SVG element
+  const svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  // Tooltip for node and link hover
+  const tooltip = d3.select(".tooltip");
+
+  // Color scale for areas
+  const colorScale = d3.scaleOrdinal(d3.schemePaired);
+  //const colorScale = d3.scaleSequential(d3.interpolateRainbow);
+  // Track selected areas for multi-select functionality
+  let selectedAreas = new Set();
+
+  // Define arrowhead marker for directed edges
+  svg.append("defs").append("marker")
+    .attr("id", "arrowhead")
+    .attr("viewBox", "-0 -5 10 10")
+    .attr("refX", 25) // Adjust this value for positioning the arrowhead
+    .attr("refY", 0)
+    .attr("orient", "auto")
+    .attr("markerWidth", 10)
+    .attr("markerHeight", 10)
+    .attr("xoverflow", "visible")
+    .append("svg:path")
+    .attr("d", "M 0,-5 L 10,0 L 0,5") // Arrow shape
+    .attr("fill", "#999") // Arrow color
+    .style("stroke", "none");
+
+  // Load JSON data
+  axios.get("arxiv_graph_random_0.001.json").then(response => {
+  const data = response.data;
+  const { nodes, links } = data;
+ 
+
+    // Extract unique areas
+    const uniqueAreas = Array.from(new Set(nodes.map(d => d.area))).sort();
+
+    // Add legend dynamically
+    const legendItems = d3.select(".legend .legend-items")
+      .selectAll(".legend-item")
+      .data(uniqueAreas)
+      .enter()
+      .append("div")
+      .attr("class", "legend-item");
+
+    legendItems.append("span")
+      .attr("class", "color-box")
+      .style("background-color", d => colorScale(d))
+      .on("mouseover", function (event, area) {
+        // Highlight nodes and links
+        node.attr("opacity", d => d.area === area ? 1 : 0.1);
+        link.attr("opacity", d => (d.source.area === area || d.target.area === area) ? 1 : 0.1);
+      })
+      .on("mouseout", function () {
+        // Restore default opacity
+        if (selectedAreas.size === 0) {
+          node.attr("opacity", 1);
+          link.attr("opacity", 1);
+        } else {
+          updateHighlight();
+        }
+      })
+      .on("click", function (event, area) {
+        // Toggle area selection
+        if (selectedAreas.has(area)) {
+          selectedAreas.delete(area);
+        } else {
+          selectedAreas.add(area);
+        }
+        updateHighlight();
+      });
+
+    legendItems.append("span")
+      .text(d => d);
+
+    // Reset button functionality
+    d3.select(".reset-button").on("click", function () {
+      selectedAreas.clear();
+      node.attr("opacity", 1);
+      link.attr("opacity", 1);
+    });
+    console.log('nodes:',nodes)
+    console.log('Links:', links)
+    // Force simulation with adjusted parameters
+    const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id).distance(50)) // 缩短连线距离
+      .force("charge", d3.forceManyBody().strength(-5000)) // 增加吸引力
+      .force("center", d3.forceCenter(width / 2, height / 2));
+
+    // Add links (edges) with arrowheads
+const link = svg.append("g")
+  .attr("class", "links")
+  .selectAll("line")
+  .data(links)
+  .enter().append("line")
+  .attr("stroke-width", 3) // 增加边的宽度
+  .attr("stroke", d => colorScale(d.source.area))
+  .attr("marker-end", "url(#arrowhead)") // Add arrowhead marker
+  .on("mouseover", (event, d) => {
+    // Show tooltip with article title
+    tooltip.style("visibility", "visible")
+      .html(`Title: ${d.title}`)
+      .style("font-size", "44px"); // 可以调整字体大小
+    d3.select(event.currentTarget)
+      .transition().duration(200)
+      .attr("stroke-width", 8); // 鼠标悬浮时加粗边
+  })
+  .on("mousemove", event => {
+    // Update tooltip position
+    tooltip.style("top", (event.pageY + 10) + "px")
+      .style("left", (event.pageX + 10) + "px");
+  })
+  .on("mouseout", (event, d) => {
+    // Hide tooltip and reset link stroke width
+    tooltip.style("visibility", "hidden");
+    d3.select(event.currentTarget)
+      .transition().duration(200)
+      .attr("stroke-width", 2); // 恢复边的宽度
+  });
+      
+
+    // Add nodes
+    const node = svg.append("g")
+      .attr("class", "nodes")
+      .selectAll("circle")
+      .data(nodes)
+      .enter().append("circle")
+      .attr("r", d => Math.sqrt(d.count) * 40) // 增大节点半径
+      .attr("fill", d => colorScale(d.area))
+      .attr("stroke", "#333")
+      .attr("stroke-width", 1.5)
+      .on("mouseover", (event, d) => {
+        tooltip.style("visibility", "visible")
+          .html(`Name: ${d.id}<br>Area: ${d.area}<br>Count: ${d.count}`);
+        d3.select(event.currentTarget)
+          .transition().duration(200)
+          .attr("r", Math.sqrt(d.count) * 55); // 鼠标悬浮放大
+      })
+      .on("mousemove", event => {
+        tooltip.style("top", (event.pageY + 10) + "px")
+          .style("left", (event.pageX + 10) + "px");
+      })
+      .on("mouseout", (event, d) => {
+        tooltip.style("visibility", "hidden");
+        d3.select(event.currentTarget)
+          .transition().duration(200)
+          .attr("r", Math.sqrt(d.count) * 25); // 恢复节点大小
+      })
+      .call(drag(simulation));
+
+    // Update positions dynamically during simulation
+    simulation.on("tick", () => {
+      link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+
+      node
+        .attr("cx", d => d.x)
+        .attr("cy", d => d.y);
+    });
+
+    // Dragging behavior
+    function drag(simulation) {
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      return d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
+    }
+
+    // Zoom and pan behavior
+    svg.call(
+      d3.zoom()
+        .extent([[0, 0], [width, height]])
+        .scaleExtent([0.01, 5])
+        .on("zoom", event => {
+          svg.selectAll("g").attr("transform", event.transform);
+        })
+    );
+
+    // Function to update node and link opacity based on selected areas
+    function updateHighlight() {
+      node.attr("opacity", d => selectedAreas.size === 0 || selectedAreas.has(d.area) ? 1 : 0.1);
+      link.attr("opacity", d => selectedAreas.size === 0 || selectedAreas.has(d.source.area) || selectedAreas.has(d.target.area) ? 1 : 0.1);
+    }
+  }) .catch(err => {
+  console.error("Error loading or parsing data:", err);
+});
+
+</script>
+</body>
+</html>

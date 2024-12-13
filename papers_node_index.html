@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <title>Relationship Graph</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+    .node:hover {
+      opacity: 0.8;
+      cursor: pointer;
+    }
+    .link:hover {
+      cursor: pointer;
+    }
+    .tooltip {
+      position: absolute;
+      text-align: center;
+      padding: 8px;
+      font-size: 12px;
+      background: rgba(0, 0, 0, 0.8);
+      color: white;
+      border-radius: 4px;
+      pointer-events: none;
+      visibility: hidden;
+    }
+    .tooltip.large-font {
+      font-size: 16px; /* 放大字体 */
+    }
+    .legend {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      background: white;
+      border: 1px solid #ccc;
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 14px;
+      box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+    }
+    .legend h3 {
+      margin: 0 0 10px 0;
+      font-size: 16px;
+      text-align: center;
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .legend-item span.color-box {
+      width: 16px;
+      height: 16px;
+      margin-right: 8px;
+      border: 1px solid #333;
+      cursor: pointer;
+    }
+    .button-container {
+      margin-top: 10px;
+      text-align: center;
+    }
+    .reset-button {
+      padding: 5px 10px;
+      border: none;
+      background: #007bff;
+      color: white;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    .reset-button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+<div class="tooltip"></div>
+<div class="legend">
+  <h3>Legend</h3>
+  <div class="legend-items"></div>
+  <div class="button-container">
+    <button class="reset-button">Reset</button>
+  </div>
+</div>
+
+<script>
+  // Set up SVG dimensions and margins
+  const width = window.innerWidth; // Shrink width to fit legend
+  const height = window.innerHeight ; // Shrink height
+
+  // Append SVG element
+  const svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+
+  // Tooltip for node and link hover
+  const tooltip = d3.select(".tooltip");
+
+  // Color scale for areas
+  const colorScale = d3.scaleOrdinal(d3.schemePaired);
+
+  // Track selected areas for multi-select functionality
+  let selectedAreas = new Set();
+
+  // Load JSON data
+  d3.json("arxiv_paper_node_0.001.json").then(data => {
+    const { nodes, links } = data;
+
+    // Extract unique areas
+    const uniqueAreas = Array.from(new Set(nodes.map(d => d.area))).sort();
+
+    // Add legend dynamically
+    const legendItems = d3.select(".legend .legend-items")
+      .selectAll(".legend-item")
+      .data(uniqueAreas)
+      .enter()
+      .append("div")
+      .attr("class", "legend-item");
+
+    legendItems.append("span")
+      .attr("class", "color-box")
+      .style("background-color", d => colorScale(d))
+      .on("mouseover", function (event, area) {
+        // Highlight nodes and links
+        node.attr("opacity", d => d.area === area ? 1 : 0.1);
+        link.attr("opacity", d => (d.source.area === area || d.target.area === area) ? 1 : 0.1);
+      })
+      .on("mouseout", function () {
+        // Restore default opacity
+        if (selectedAreas.size === 0) {
+          node.attr("opacity", 1);
+          link.attr("opacity", 1);
+        } else {
+          updateHighlight();
+        }
+      })
+      .on("click", function (event, area) {
+        // Toggle area selection
+        if (selectedAreas.has(area)) {
+          selectedAreas.delete(area);
+        } else {
+          selectedAreas.add(area);
+        }
+        updateHighlight();
+      });
+
+    legendItems.append("span")
+      .text(d => d);
+
+    // Reset button functionality
+    d3.select(".reset-button").on("click", function () {
+      selectedAreas.clear();
+      node.attr("opacity", 1);
+      link.attr("opacity", 1);
+    });
+
+    // Force simulation with adjusted parameters
+    const simulation = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id).distance(150)) // Increase link distance to spread nodes
+      .force("charge", d3.forceManyBody().strength(-500)) // Stronger repulsion between nodes
+      .force("center", d3.forceCenter(width / 2, height / 2)) // Center the graph
+      .force("collision", d3.forceCollide().radius(d => Math.sqrt(d.count * 10) + 20)); // Add more space between nodes
+
+    // Add links (edges)
+    const link = svg.append("g")
+      .attr("class", "links")
+      .selectAll("line")
+      .data(links)
+      .enter().append("line")
+      .attr("stroke-width", 1.5)
+      .attr("stroke", d => colorScale(d.source.area));
+
+    // Add nodes
+    const node = svg.append("g")
+      .attr("class", "nodes")
+      .selectAll("circle")
+      .data(nodes)
+      .enter().append("circle")
+      .attr("r", d => Math.sqrt(d.count) * 5) // Circle radius based on count
+      .attr("fill", d => colorScale(d.area))
+      .attr("stroke", "#333")
+      .attr("stroke-width", 1.5)
+      .on("mouseover", (event, d) => {
+        tooltip.style("visibility", "visible")
+          .classed("large-font", true) // Add large font class
+          .html(`Title: ${d.id}<br>Area: ${d.area}<br>Author Count: ${d.count}`);
+        d3.select(event.currentTarget)
+          .transition()
+          .duration(200)
+          .attr("opacity", 0.8)
+          .attr("r", Math.sqrt(d.count) * 7); // Increase circle radius on hover
+      })
+      .on("mousemove", event => {
+        tooltip.style("top", (event.pageY + 10) + "px")
+          .style("left", (event.pageX + 10) + "px");
+      })
+      .on("mouseout", (event, d) => {
+        tooltip.style("visibility", "hidden")
+          .classed("large-font", false); // Remove large font class
+        d3.select(event.currentTarget)
+          .transition()
+          .duration(200)
+          .attr("opacity", 1)
+          .attr("r", Math.sqrt(d.count) * 5); // Restore circle radius
+      })
+      .call(drag(simulation));
+
+    // Update positions dynamically during simulation
+    simulation.on("tick", () => {
+      link
+        .attr("x1", d => d.source.x)
+        .attr("y1", d => d.source.y)
+        .attr("x2", d => d.target.x)
+        .attr("y2", d => d.target.y);
+
+      node
+        .attr("cx", d => d.x)
+        .attr("cy", d => d.y);
+    });
+
+    // Dragging behavior
+    function drag(simulation) {
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+
+      return d3.drag()
+        .on("start", dragstarted)
+        .on("drag", dragged)
+        .on("end", dragended);
+    }
+
+    // Zoom and pan behavior
+    svg.call(
+      d3.zoom()
+        .extent([[0, 0], [width, height]])
+        .scaleExtent([0.1, 5]) // Limit zoom scale
+        .on("zoom", event => {
+          svg.selectAll("g").attr("transform", event.transform);
+        })
+    );
+
+    // Function to update node and link opacity based on selected areas
+    function updateHighlight() {
+      node.attr("opacity", d => selectedAreas.size === 0 || selectedAreas.has(d.area) ? 1 : 0.1);
+      link.attr("opacity", d => selectedAreas.size === 0 || selectedAreas.has(d.source.area) || selectedAreas.has(d.target.area) ? 1 : 0.1);
+    }
+  }).catch(err => {
+    console.error("Error loading or parsing data:", err);
+  });
+</script>
+</body>
+</html>
